@@ -19,7 +19,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.get("/", (req, res) => res.send("LIALI Valuation Portal API running"));
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
-app.use("/api/collections", require("./routes/collectionRoutes"));
+app.use("/api/brands", require("./routes/brandRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/settings", require("./routes/settingsRoutes"));
 app.use("/api/upload", require("./routes/uploadRoutes"));

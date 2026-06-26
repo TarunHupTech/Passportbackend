@@ -41,25 +41,26 @@ const productSchema = new mongoose.Schema(
       default: "None",
     },
     stoneWeight: { type: Number, default: 0, min: 0 }, // carat
-    makingCharges: { type: Number, default: 0, min: 0 }, // AED
     images: { type: [String], default: [] }, // gallery (cloud paths)
     image: { type: String, default: "" }, // primary thumbnail (= images[0])
-    collectionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Collection",
-      default: null,
-    },
+
+    // Free-text brand name (links the item to a Brand on the Brands page).
+    brand: { type: String, default: "", trim: true, index: true },
+
+    // Value is entered directly by the customer (AED).
+    invoiceAmount: { type: Number, default: 0, min: 0 },
+    // Internal value used by dashboard/certificate roll-ups — mirrors invoiceAmount.
+    estimatedValue: { type: Number, default: 0 },
+
     notes: { type: String, default: "", trim: true },
     purchasedFrom: { type: String, default: "", trim: true },
-    purchaseDate: { type: Date, default: null },
-    verified: { type: Boolean, default: false },
 
-    // Cached valuation results (recomputed on every create/update).
-    estimatedValue: { type: Number, default: 0 },
-    resaleValue: { type: Number, default: 0 },
-    metalValue: { type: Number, default: 0 },
-    stoneValue: { type: Number, default: 0 },
-    valuedAt: { type: Date, default: null },
+    // Either a purchase date, or (when gifted) a gifted date.
+    isGift: { type: Boolean, default: false },
+    purchaseDate: { type: Date, default: null },
+    giftedDate: { type: Date, default: null },
+
+    verified: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

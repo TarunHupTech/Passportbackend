@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const ctrl = require("../controller/collectionController");
+const ctrl = require("../controller/brandController");
 const { protect } = require("../middlerware/auth");
 
 router.use(protect);

@@ -1,7 +1,7 @@
 const Product = require("../models/Product");
-const Collection = require("../models/Collection");
+const Brand = require("../models/Brand");
 
-// GET /api/dashboard — portfolio overview matching the prototype.
+// GET /api/dashboard — portfolio overview.
 exports.overview = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -12,28 +12,21 @@ exports.overview = async (req, res) => {
         $group: {
           _id: null,
           itemCount: { $sum: 1 },
-          totalEstimatedValue: { $sum: "$estimatedValue" },
-          totalResaleValue: { $sum: "$resaleValue" },
+          totalInvoiceAmount: { $sum: "$estimatedValue" },
         },
       },
     ]);
 
-    const [collectionsCount, mostValuable, recentItems] = await Promise.all([
-      Collection.countDocuments({ user: userId }),
-      Product.findOne({ user: userId })
-        .sort({ estimatedValue: -1 })
-        .populate("collectionId", "name"),
-      Product.find({ user: userId })
-        .sort({ createdAt: -1 })
-        .limit(6)
-        .populate("collectionId", "name"),
+    const [brandsCount, mostValuable, recentItems] = await Promise.all([
+      Brand.countDocuments({ user: userId }),
+      Product.findOne({ user: userId }).sort({ estimatedValue: -1 }),
+      Product.find({ user: userId }).sort({ createdAt: -1 }).limit(6),
     ]);
 
     return res.json({
       itemCount: agg?.itemCount || 0,
-      totalEstimatedValue: Math.round((agg?.totalEstimatedValue || 0) * 100) / 100,
-      totalResaleValue: Math.round((agg?.totalResaleValue || 0) * 100) / 100,
-      collectionsCount,
+      totalInvoiceAmount: Math.round((agg?.totalInvoiceAmount || 0) * 100) / 100,
+      brandsCount,
       mostValuableItem: mostValuable || null,
       recentItems,
     });

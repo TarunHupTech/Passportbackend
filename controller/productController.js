@@ -1,6 +1,5 @@
 const Product = require("../models/Product");
-const Settings = require("../models/Settings");
-const { valueItem } = require("../utils/valuation");
+const Brand = require("../models/Brand");
 
 // Fields a client is allowed to set on a product.
 const WRITABLE = [
@@ -12,13 +11,15 @@ const WRITABLE = [
   "grossWeight",
   "stoneType",
   "stoneWeight",
-  "makingCharges",
   "images",
   "image",
-  "collectionId",
+  "brand",
+  "invoiceAmount",
   "notes",
   "purchasedFrom",
+  "isGift",
   "purchaseDate",
+  "giftedDate",
   "verified",
 ];
 
@@ -27,24 +28,38 @@ function pickWritable(body) {
   for (const key of WRITABLE) {
     if (body[key] !== undefined) out[key] = body[key];
   }
-  // An empty collection string means "no collection".
-  if (out.collectionId === "" || out.collectionId === "null")
-    out.collectionId = null;
   // Keep the primary thumbnail in sync with the gallery's first image.
   if (Array.isArray(out.images)) out.image = out.images[0] || "";
+  // The dashboard/certificate roll-ups read estimatedValue — mirror the invoice.
+  if (out.invoiceAmount !== undefined) {
+    out.invoiceAmount = Number(out.invoiceAmount) || 0;
+    out.estimatedValue = out.invoiceAmount;
+  }
+  if (typeof out.brand === "string") out.brand = out.brand.trim();
   return out;
 }
 
-// GET /api/products?search=&metalType=&stoneType=&collection=&sort=
+// Auto-create the Brand doc so a newly-typed brand shows on the Brands page.
+async function ensureBrand(userId, name) {
+  const n = (name || "").trim();
+  if (!n) return;
+  await Brand.updateOne(
+    { user: userId, name: n },
+    { $setOnInsert: { user: userId, name: n } },
+    { upsert: true }
+  );
+}
+
+// GET /api/products?search=&metalType=&stoneType=&brand=&sort=
 exports.list = async (req, res) => {
   try {
-    const { search, metalType, stoneType, collectionId, sort } = req.query;
+    const { search, metalType, stoneType, brand, sort } = req.query;
     const filter = { user: req.user._id };
 
     if (search) filter.name = { $regex: search.trim(), $options: "i" };
     if (metalType) filter.metalType = metalType;
     if (stoneType) filter.stoneType = stoneType;
-    if (collectionId) filter.collectionId = collectionId;
+    if (brand) filter.brand = brand;
 
     const sortMap = {
       newest: { createdAt: -1 },
@@ -54,10 +69,9 @@ exports.list = async (req, res) => {
       name: { name: 1 },
     };
 
-    const products = await Product.find(filter)
-      .populate("collectionId", "name")
-      .sort(sortMap[sort] || { createdAt: -1 });
-
+    const products = await Product.find(filter).sort(
+      sortMap[sort] || { createdAt: -1 }
+    );
     return res.json(products);
   } catch (err) {
     console.error("product list error:", err);
@@ -71,7 +85,7 @@ exports.getOne = async (req, res) => {
     const product = await Product.findOne({
       _id: req.params.id,
       user: req.user._id,
-    }).populate("collectionId", "name");
+    });
     if (!product) return res.status(404).json({ message: "Item not found" });
     return res.json(product);
   } catch (err) {
@@ -86,16 +100,9 @@ exports.create = async (req, res) => {
     const data = pickWritable(req.body);
     if (!data.name) return res.status(400).json({ message: "Name is required" });
 
-    const settings = await Settings.getSingleton();
-    const valuation = valueItem(data, settings);
-
-    const product = await Product.create({
-      ...data,
-      ...valuation,
-      user: req.user._id,
-    });
-    const populated = await product.populate("collectionId", "name");
-    return res.status(201).json(populated);
+    await ensureBrand(req.user._id, data.brand);
+    const product = await Product.create({ ...data, user: req.user._id });
+    return res.status(201).json(product);
   } catch (err) {
     console.error("product create error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -113,13 +120,10 @@ exports.update = async (req, res) => {
 
     const data = pickWritable(req.body);
     Object.assign(product, data);
-
-    const settings = await Settings.getSingleton();
-    Object.assign(product, valueItem(product, settings));
+    await ensureBrand(req.user._id, product.brand);
 
     await product.save();
-    const populated = await product.populate("collectionId", "name");
-    return res.json(populated);
+    return res.json(product);
   } catch (err) {
     console.error("product update error:", err);
     return res.status(500).json({ message: "Server error" });

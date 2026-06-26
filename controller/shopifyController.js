@@ -198,3 +198,108 @@ exports.accountSso = async (req, res) => {
     return res.status(500).send("Sign-in failed");
   }
 };
+
+// --- Customer orders ------------------------------------------------------
+
+const ORDERS_QUERY = `query CustomerOrders($id: ID!, $first: Int!) {
+  customer(id: $id) {
+    id
+    orders(first: $first, sortKey: PROCESSED_AT, reverse: true) {
+      edges { node {
+        id
+        name
+        processedAt
+        createdAt
+        displayFinancialStatus
+        displayFulfillmentStatus
+        currentTotalPriceSet { shopMoney { amount currencyCode } }
+        lineItems(first: 50) {
+          edges { node {
+            title
+            quantity
+            variantTitle
+            originalTotalSet { shopMoney { amount currencyCode } }
+            image { url altText }
+          } }
+        }
+      } }
+    }
+  }
+}`;
+
+async function adminGraphQL(shop, query, variables) {
+  const version = process.env.SHOPIFY_ADMIN_API_VERSION || "2025-10";
+  const response = await fetch(
+    `https://${shop}/admin/api/${version}/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    }
+  );
+  return response.json();
+}
+
+// GET /api/shopify/orders — the logged-in customer's Shopify orders.
+// `linked` tells the client whether this account is tied to a Shopify customer.
+exports.getCustomerOrders = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user?.shopifyCustomerId) {
+      return res.json({ linked: false, orders: [] });
+    }
+    if (!process.env.SHOPIFY_ADMIN_TOKEN) {
+      return res.json({
+        linked: true,
+        orders: [],
+        message: "Shopify orders are not configured on the server.",
+      });
+    }
+
+    const shop = user.shopifyDomain || process.env.SHOPIFY_STORE_DOMAIN;
+    const result = await adminGraphQL(shop, ORDERS_QUERY, {
+      id: `gid://shopify/Customer/${user.shopifyCustomerId}`,
+      first: 50,
+    });
+
+    if (result.errors) {
+      console.error("shopify orders error:", JSON.stringify(result.errors));
+      return res.json({
+        linked: true,
+        orders: [],
+        message:
+          "Could not load orders from Shopify. Ensure the Admin app has read_orders access.",
+      });
+    }
+
+    const edges = result.data?.customer?.orders?.edges || [];
+    const orders = edges.map(({ node }) => ({
+      id: node.id,
+      name: node.name,
+      processedAt: node.processedAt || node.createdAt,
+      financialStatus: node.displayFinancialStatus || null,
+      fulfillmentStatus: node.displayFulfillmentStatus || null,
+      total: node.currentTotalPriceSet?.shopMoney || null,
+      lineItems: (node.lineItems?.edges || []).map(({ node: li }) => ({
+        title: li.title,
+        variantTitle:
+          li.variantTitle && li.variantTitle !== "Default Title"
+            ? li.variantTitle
+            : "",
+        quantity: li.quantity,
+        image: li.image?.url || null,
+        price: li.originalTotalSet?.shopMoney || null,
+      })),
+    }));
+
+    return res.json({ linked: true, orders });
+  } catch (err) {
+    console.error("shopify getCustomerOrders error:", err);
+    return res
+      .status(500)
+      .json({ linked: true, orders: [], message: "Server error" });
+  }
+};

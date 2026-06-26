@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 
-const collectionSchema = new mongoose.Schema(
+// A brand the customer owns pieces from (e.g. Cartier). Brands are referenced
+// by name on each product; this doc stores the brand's cover image + details.
+const brandSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -15,4 +17,7 @@ const collectionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Collection", collectionSchema);
+// One brand name per user.
+brandSchema.index({ user: 1, name: 1 }, { unique: true });
+
+module.exports = mongoose.model("Brand", brandSchema);
