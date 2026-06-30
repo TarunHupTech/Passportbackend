@@ -53,6 +53,7 @@ const productSchema = new mongoose.Schema(
     estimatedValue: { type: Number, default: 0 },
 
     notes: { type: String, default: "", trim: true },
+    occasion: { type: String, default: "", trim: true },
     purchasedFrom: { type: String, default: "", trim: true },
 
     // Either a purchase date, or (when gifted) a gifted date.

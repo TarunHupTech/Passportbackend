@@ -16,6 +16,7 @@ const WRITABLE = [
   "brand",
   "invoiceAmount",
   "notes",
+  "occasion",
   "purchasedFrom",
   "isGift",
   "purchaseDate",
