@@ -9,37 +9,15 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true },
-    itemType: {
-      type: String,
-      enum: [
-        "Necklace",
-        "Ring",
-        "Earrings",
-        "Bracelet",
-        "Bangle",
-        "Pendant",
-        "Chain",
-        "Other",
-      ],
-      default: "Other",
-    },
-    metalType: {
-      type: String,
-      enum: ["Gold", "Rose Gold", "White Gold", "Silver", "Platinum"],
-      default: "Gold",
-    },
-    purity: {
-      type: String,
-      enum: ["24k", "22k", "21k", "18k", "14k", "925"],
-      default: "22k",
-    },
+    // These option lists are admin-managed (see the Attribute model), so the
+    // fields are plain strings — values are validated against the live lists
+    // on the client, not via a fixed schema enum.
+    itemType: { type: String, default: "Other", trim: true },
+    metalType: { type: String, default: "Gold", trim: true },
+    purity: { type: String, default: "22k", trim: true },
     netWeight: { type: Number, default: 0, min: 0 }, // grams
     grossWeight: { type: Number, default: 0, min: 0 }, // grams
-    stoneType: {
-      type: String,
-      enum: ["None", "Diamond", "Ruby", "Emerald", "Sapphire", "Pearl", "Other"],
-      default: "None",
-    },
+    stoneType: { type: String, default: "None", trim: true },
     stoneWeight: { type: Number, default: 0, min: 0 }, // carat
     images: { type: [String], default: [] }, // gallery (cloud paths)
     image: { type: String, default: "" }, // primary thumbnail (= images[0])
