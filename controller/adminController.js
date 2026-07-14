@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const Admin = require("../models/Admin");
 const User = require("../models/User");
 const Product = require("../models/Product");
@@ -205,6 +206,164 @@ exports.analytics = async (req, res) => {
     });
   } catch (err) {
     console.error("admin analytics error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// --- Customer list + per-customer summary --------------------------------
+
+// Aggregations scoped by `match` ({} = all customers, {user} = one customer).
+async function buildAnalytics(match) {
+  const groupBy = (field) =>
+    Product.aggregate([
+      { $match: match },
+      { $group: { _id: `$${field}`, count: { $sum: 1 }, value: { $sum: "$estimatedValue" } } },
+      { $sort: { count: -1 } },
+    ]);
+
+  const [items, totalAgg, giftCount, distinctBrands, typeAgg, metalAgg, stoneAgg, occasionAgg, brandAgg, bucketAgg, monthAgg] =
+    await Promise.all([
+      Product.countDocuments(match),
+      Product.aggregate([{ $match: match }, { $group: { _id: null, total: { $sum: "$estimatedValue" } } }]),
+      Product.countDocuments({ ...match, isGift: true }),
+      Product.distinct("brand", { ...match, brand: { $nin: [null, ""] } }),
+      groupBy("itemType"),
+      groupBy("metalType"),
+      groupBy("stoneType"),
+      Product.aggregate([
+        { $match: { ...match, occasion: { $nin: [null, ""] } } },
+        { $group: { _id: "$occasion", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+      Product.aggregate([
+        { $match: { ...match, brand: { $nin: [null, ""] } } },
+        { $group: { _id: "$brand", count: { $sum: 1 }, value: { $sum: "$estimatedValue" } } },
+        { $sort: { value: -1 } },
+        { $limit: 8 },
+      ]),
+      Product.aggregate([
+        { $match: match },
+        {
+          $bucket: {
+            groupBy: "$estimatedValue",
+            boundaries: [0, 1000, 5000, 10000, 25000, 50000, 100000],
+            default: "100K+",
+            output: { count: { $sum: 1 } },
+          },
+        },
+      ]),
+      Product.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } },
+            count: { $sum: 1 },
+            value: { $sum: "$estimatedValue" },
+          },
+        },
+        { $sort: { "_id.y": 1, "_id.m": 1 } },
+      ]),
+    ]);
+
+  const totalValue = round(totalAgg[0]?.total || 0);
+  const fmt = (agg) => agg.map((g) => ({ label: g._id || "—", count: g.count, value: round(g.value) }));
+  const bucketMap = {};
+  bucketAgg.forEach((b) => (bucketMap[b._id] = b.count));
+  const priceBuckets = PRICE_BUCKETS.map((bk) => ({ label: bk.label, count: bucketMap[bk.key] || 0 }));
+
+  return {
+    totals: {
+      items,
+      totalValue,
+      avgValue: items ? round(totalValue / items) : 0,
+      brands: distinctBrands.length,
+      giftCount,
+      giftPct: items ? Math.round((giftCount / items) * 100) : 0,
+    },
+    byItemType: fmt(typeAgg),
+    byMetal: fmt(metalAgg),
+    byStone: fmt(stoneAgg),
+    byOccasion: occasionAgg.map((g) => ({ label: g._id, count: g.count })),
+    topBrands: brandAgg.map((g) => ({ label: g._id, count: g.count, value: round(g.value) })),
+    giftSplit: { gift: giftCount, purchased: Math.max(0, items - giftCount) },
+    priceBuckets,
+    monthlyTrend: buildMonthly(monthAgg),
+  };
+}
+
+// GET /api/admin/customers — every customer with summary stats.
+exports.listCustomers = async (req, res) => {
+  try {
+    const [users, rollups] = await Promise.all([
+      User.find().sort({ createdAt: -1 }).lean(),
+      Product.aggregate([
+        { $group: { _id: "$user", items: { $sum: 1 }, value: { $sum: "$estimatedValue" } } },
+      ]),
+    ]);
+    const byUser = {};
+    rollups.forEach((r) => (byUser[String(r._id)] = r));
+    const customers = users
+      .map((u) => {
+        const r = byUser[String(u._id)] || { items: 0, value: 0 };
+        return {
+          id: u._id,
+          name: u.name,
+          email: u.email,
+          source: u.shopifyCustomerId ? "Shopify" : "Email",
+          items: r.items,
+          value: round(r.value),
+          joinedAt: u.createdAt,
+        };
+      })
+      .sort((a, b) => b.value - a.value || b.items - a.items);
+    return res.json({ customers });
+  } catch (err) {
+    console.error("admin listCustomers error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /api/admin/customers/:id — one customer's summary + full item list.
+exports.customerDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id))
+      return res.status(400).json({ message: "Invalid customer id" });
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ message: "Customer not found" });
+
+    const oid = new mongoose.Types.ObjectId(id);
+    const [base, items] = await Promise.all([
+      buildAnalytics({ user: oid }),
+      Product.find({ user: oid }).sort({ estimatedValue: -1 }).lean(),
+    ]);
+
+    return res.json({
+      customer: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        source: user.shopifyCustomerId ? "Shopify" : "Email",
+        joinedAt: user.createdAt,
+      },
+      ...base,
+      items: items.map((p) => ({
+        id: p._id,
+        name: p.name,
+        itemType: p.itemType,
+        metalType: p.metalType,
+        purity: p.purity,
+        stoneType: p.stoneType,
+        brand: p.brand || "",
+        value: p.invoiceAmount ?? p.estimatedValue ?? 0,
+        isGift: !!p.isGift,
+        occasion: p.occasion || "",
+        createdAt: p.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error("admin customerDetail error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
