@@ -2,3 +2,7 @@ node_modules
 .env
 .env.backup
 dist
+
+# Customer-uploaded jewellery photos — runtime data, never committed.
+# middlerware/upload.js recreates this directory on startup.
+uploads/
